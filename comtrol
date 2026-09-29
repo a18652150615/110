@@ -1,0 +1,8 @@
+Package: com.xxx.openjbbridge
+Name: OpenJBURLBridge
+Version: 1.0
+Architecture: iphoneos-arm64
+Description: URL bridge for TrollOpen JB
+Maintainer: User
+Section: Tweaks
+Depends: mobilesubstrate, firmware (>=16.0)
