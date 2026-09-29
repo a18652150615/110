@@ -1,0 +1,19 @@
+name: Build Tweak
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with Theos
+        uses: zhuowei/theos-action@v1
+        with:
+          deployment_target: 16.0
+          rootless: true
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-package
+          path: packages/*.deb
