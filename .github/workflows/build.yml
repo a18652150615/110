@@ -10,17 +10,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Theos
-        uses: theosdev/theos-action@v1
-        with:
-          sdks: iphoneos16.0
-          
-      - name: Build Package
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git build-essential libssl-dev libplist-dev libplist++-dev libpng16-dev
+
+      - name: Clone Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git ${{ github.workspace }}/theos
+          echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
+
+      - name: Pull iOS SDKs
+        run: |
+          git clone https://github.com/theos/sdks.git ${{ github.workspace }}/theos/sdks
+
+      - name: Build DEB package
         run: |
           make clean package THEOS_PACKAGE_SCHEME=rootless
-          
-      - name: Upload DEB Artifact
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: SplitScreenTweak-deb
