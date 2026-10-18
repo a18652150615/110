@@ -2,206 +2,235 @@
 #import <Foundation/Foundation.h>
 #import <QuartzCore/QuartzCore.h>
 
-#define kPrefBundle @"com.yourname.splitscreentweak.prefs"
+// ============================================================
+// 稳定版：仅左下角呼出，避免与Open冲突
+// ============================================================
 
 @interface SPSplitScreenManager : NSObject
-@property (nonatomic, assign) BOOL tweakEnabled;
-@property (nonatomic, assign) NSInteger triggerCorner;
-@property (nonatomic, assign) NSInteger splitRatio;
 @property (nonatomic, strong) NSMutableArray *floatingWindows;
 @property (nonatomic, strong) UIWindow *splitWindow;
+@property (nonatomic, strong) UIWindow *pinWindow;
+@property (nonatomic, assign) BOOL hasShown;
 + (instancetype)sharedInstance;
-- (void)loadPrefs;
-- (void)showSplitScreenAtPoint:(CGPoint)point;
+- (UIWindowScene *)mainScene;
+- (void)showSplitScreen;
 - (void)dismissSplitScreen;
-- (void)pinSplitScreenToSide;
+- (void)pinSplitScreen;
 @end
 
-static SPSplitScreenManager *manager = nil;
+static SPSplitScreenManager *g_mgr = nil;
 
 @implementation SPSplitScreenManager
 
 + (instancetype)sharedInstance {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        manager = [[SPSplitScreenManager alloc] init];
-        manager.floatingWindows = [NSMutableArray array];
+        g_mgr = [[self alloc] init];
+        g_mgr.floatingWindows = [NSMutableArray array];
+        g_mgr.hasShown = NO;
     });
-    return manager;
+    return g_mgr;
 }
 
-- (void)loadPrefs {
-    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:kPrefBundle];
-    self.tweakEnabled = [defaults boolForKey:@"tweakEnabled"];
-    self.triggerCorner = [defaults integerForKey:@"triggerCorner"];
-    self.splitRatio = [defaults integerForKey:@"splitRatio"];
-    if (![defaults boolForKey:@"tweakEnabled"]) {
-        self.tweakEnabled = YES;
-        self.triggerCorner = 0;
-        self.splitRatio = 0;
+- (UIWindowScene *)mainScene {
+    @try {
+        for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes.allObjects) {
+            if ([scene isKindOfClass:[UIWindowScene class]] &&
+                scene.activationState == UISceneActivationStateForegroundActive) {
+                return scene;
+            }
+        }
+    } @catch (NSException *e) {}
+    return nil;
+}
+
+- (void)showSplitScreen {
+    @try {
+        if (self.splitWindow) return;
+        if (self.hasShown) return;
+
+        UIWindowScene *scene = [self mainScene];
+        if (!scene) return;
+
+        CGRect screenBounds = [UIScreen mainScreen].bounds;
+        CGFloat width = screenBounds.size.width * 0.45;  // 默认45%比例
+        CGFloat height = screenBounds.size.height * 0.6;
+
+        UIWindow *win = [[UIWindow alloc] initWithWindowScene:scene];
+        win.frame = CGRectMake(0, screenBounds.size.height - height, width, height);
+        win.windowLevel = UIWindowLevelAlert + 1;
+        win.backgroundColor = [UIColor colorWithRed:0.95 green:0.95 blue:0.95 alpha:1.0];
+        win.layer.cornerRadius = 16;
+        win.layer.masksToBounds = YES;
+
+        // 顶部条 - 点击全屏
+        UIView *topBar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 44)];
+        topBar.backgroundColor = [UIColor lightGrayColor];
+        UITapGestureRecognizer *topTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onTopTap)];
+        [topBar addGestureRecognizer:topTap];
+        [win addSubview:topBar];
+
+        UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(12, 12, 200, 20)];
+        lbl.text = @"分屏小窗 · 点顶部全屏";
+        lbl.textColor = [UIColor darkGrayColor];
+        lbl.font = [UIFont systemFontOfSize:14];
+        [topBar addSubview:lbl];
+
+        // 右侧条 - 点击收起
+        UIView *rightBar = [[UIView alloc] initWithFrame:CGRectMake(width-20, 44, 20, height-64)];
+        UITapGestureRecognizer *rightTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onEdgeTap)];
+        [rightBar addGestureRecognizer:rightTap];
+        [win addSubview:rightBar];
+
+        // 底部条 - 点击收起
+        UIView *bottomBar = [[UIView alloc] initWithFrame:CGRectMake(0, height-20, width, 20)];
+        UITapGestureRecognizer *bottomTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onEdgeTap)];
+        [bottomBar addGestureRecognizer:bottomTap];
+        [win addSubview:bottomBar];
+
+        // 右下角拖动 - 调整大小
+        UIView *dragHandle = [[UIView alloc] initWithFrame:CGRectMake(width-30, height-30, 30, 30)];
+        dragHandle.backgroundColor = [UIColor systemBlueColor];
+        dragHandle.layer.cornerRadius = 6;
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(onResizePan:)];
+        [dragHandle addGestureRecognizer:pan];
+        [win addSubview:dragHandle];
+
+        self.splitWindow = win;
+        win.hidden = NO;
+        self.hasShown = YES;
+
+        NSLog(@"[SplitScreen] Window shown OK");
+    } @catch (NSException *e) {
+        NSLog(@"[SplitScreen] show error: %@", e);
+        self.splitWindow = nil;
     }
 }
 
-- (CGFloat)ratioForType:(NSInteger)type {
-    switch (type) {
-        case 1: return 16.0/9.0;
-        case 2: return 5.0/3.0;
-        case 3: return 4.0/3.0;
-        case 4: return 1.0;
-        default: return 0.45;
-    }
-}
-
-- (void)showSplitScreenAtPoint:(CGPoint)point {
-    if (!self.tweakEnabled) return;
-    if (self.splitWindow) return;
-
-    CGRect screenBounds = [UIScreen mainScreen].bounds;
-    CGFloat width = screenBounds.size.width * [self ratioForType:self.splitRatio];
-    CGFloat height = screenBounds.size.height * 0.6;
-
-    self.splitWindow = [[UIWindow alloc] initWithFrame:CGRectMake(
-        screenBounds.size.width - width,
-        screenBounds.size.height - height,
-        width,
-        height
-    )];
-    self.splitWindow.windowLevel = UIWindowLevelAlert + 1;
-    self.splitWindow.backgroundColor = [UIColor systemBackgroundColor];
-    self.splitWindow.layer.cornerRadius = 16;
-    self.splitWindow.layer.masksToBounds = YES;
-
-    UIView *topBar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.splitWindow.bounds.size.width, 40)];
-    topBar.backgroundColor = [UIColor tertiarySystemBackgroundColor];
-    UITapGestureRecognizer *topTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTopTap)];
-    [topBar addGestureRecognizer:topTap];
-    [self.splitWindow addSubview:topBar];
-
-    UIView *leftEdge = [[UIView alloc] initWithFrame:CGRectMake(0, 40, 20, self.splitWindow.bounds.size.height-40)];
-    UITapGestureRecognizer *leftTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleEdgeTap)];
-    [leftEdge addGestureRecognizer:leftTap];
-    [self.splitWindow addSubview:leftEdge];
-
-    UIView *bottomEdge = [[UIView alloc] initWithFrame:CGRectMake(0, self.splitWindow.bounds.size.height-20, self.splitWindow.bounds.size.width, 20)];
-    UITapGestureRecognizer *bottomTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleEdgeTap)];
-    [bottomEdge addGestureRecognizer:bottomTap];
-    [self.splitWindow addSubview:bottomEdge];
-
-    UIView *resizeHandle = [[UIView alloc] initWithFrame:CGRectMake(self.splitWindow.bounds.size.width-30, self.splitWindow.bounds.size.height-30, 30, 30)];
-    resizeHandle.backgroundColor = [UIColor systemBlueColor];
-    resizeHandle.layer.cornerRadius = 8;
-    UIPanGestureRecognizer *resizePan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleResizePan:)];
-    [resizeHandle addGestureRecognizer:resizePan];
-    [self.splitWindow addSubview:resizeHandle];
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self.splitWindow makeKeyAndVisible];
-    });
-}
-
-- (void)handleTopTap {
-    dispatch_async(dispatch_get_main_queue(), ^{
+- (void)onTopTap {
+    @try {
         [UIView animateWithDuration:0.3 animations:^{
             self.splitWindow.frame = [UIScreen mainScreen].bounds;
         }];
-    });
+    } @catch (NSException *e) {}
 }
 
-- (void)handleEdgeTap {
-    [self pinSplitScreenToSide];
+- (void)onEdgeTap {
+    @try {
+        [self pinSplitScreen];
+    } @catch (NSException *e) {}
+}
+
+- (void)pinSplitScreen {
+    @try {
+        if (!self.splitWindow) return;
+
+        CGRect screenBounds = [UIScreen mainScreen].bounds;
+        UIWindowScene *scene = [self mainScene];
+        if (!scene) return;
+
+        self.splitWindow.hidden = YES;
+
+        // 图钉挂在屏幕右侧
+        CGRect pinFrame = CGRectMake(screenBounds.size.width - 32, 200, 32, 80);
+        UIWindow *pinWin = [[UIWindow alloc] initWithWindowScene:scene];
+        pinWin.frame = pinFrame;
+        pinWin.windowLevel = UIWindowLevelAlert + 2;
+        pinWin.backgroundColor = [UIColor clearColor];
+
+        UIView *pinView = [[UIView alloc] initWithFrame:pinFrame];
+        pinView.backgroundColor = [UIColor systemBlueColor];
+        pinView.layer.cornerRadius = 8;
+
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onPinTap:)];
+        [pinView addGestureRecognizer:tap];
+        [pinWin addSubview:pinView];
+
+        self.pinWindow = pinWin;
+        pinWin.hidden = NO;
+    } @catch (NSException *e) {
+        NSLog(@"[SplitScreen] pin error: %@", e);
+    }
+}
+
+- (void)onPinTap:(UITapGestureRecognizer *)tap {
+    @try {
+        self.pinWindow.hidden = YES;
+        self.pinWindow = nil;
+        self.splitWindow.hidden = NO;
+    } @catch (NSException *e) {}
+}
+
+- (void)onResizePan:(UIPanGestureRecognizer *)pan {
+    @try {
+        if (!self.splitWindow) return;
+        CGPoint t = [pan translationInView:self.splitWindow];
+        CGRect f = self.splitWindow.frame;
+        f.size.width = MAX(200, f.size.width + t.x);
+        f.size.height = MAX(300, f.size.height + t.y);
+        f.origin.x = 0;
+        f.origin.y = [UIScreen mainScreen].bounds.size.height - f.size.height;
+        self.splitWindow.frame = f;
+        [pan setTranslation:CGPointZero inView:self.splitWindow];
+    } @catch (NSException *e) {}
 }
 
 - (void)dismissSplitScreen {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self.splitWindow setHidden:YES];
+    @try {
+        [self.splitWindow removeFromSuperview];
         self.splitWindow = nil;
-    });
-}
-
-- (void)pinSplitScreenToSide {
-    CGRect screenBounds = [UIScreen mainScreen].bounds;
-    CGRect pinFrame = CGRectMake(screenBounds.size.width - 30, 200, 30, 80);
-
-    UIWindow *pinWindow = [[UIWindow alloc] initWithFrame:pinFrame];
-    pinWindow.windowLevel = UIWindowLevelAlert + 2;
-    pinWindow.backgroundColor = [UIColor clearColor];
-
-    UIView *pinView = [[UIView alloc] initWithFrame:pinFrame];
-    pinView.backgroundColor = [UIColor systemBlueColor];
-    pinView.layer.cornerRadius = 8;
-
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(restoreFromPin:)];
-    [pinView addGestureRecognizer:tap];
-
-    [pinWindow addSubview:pinView];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [pinWindow makeKeyAndVisible];
-    });
-
-    [self.floatingWindows addObject:pinWindow];
-    [self.splitWindow setHidden:YES];
-}
-
-- (void)restoreFromPin:(UITapGestureRecognizer *)tap {
-    if (tap.view && tap.view.superview) {
-        [tap.view.superview removeFromSuperview];
-        [self.floatingWindows removeObject:tap.view.superview];
-    }
-    [self.splitWindow setHidden:NO];
-}
-
-- (void)handleResizePan:(UIPanGestureRecognizer *)pan {
-    if (!self.splitWindow) return;
-    
-    CGPoint translation = [pan translationInView:self.splitWindow];
-    CGRect frame = self.splitWindow.frame;
-    frame.size.width = MAX(200, frame.size.width + translation.x);
-    frame.size.height = MAX(300, frame.size.height + translation.y);
-    frame.origin.x = [UIScreen mainScreen].bounds.size.width - frame.size.width;
-    frame.origin.y = [UIScreen mainScreen].bounds.size.height - frame.size.height;
-    
-    dispatch_async(dispatch_get_main_queue(), ^{
-        self.splitWindow.frame = frame;
-    });
-    
-    [pan setTranslation:CGPointZero inView:self.splitWindow];
+        self.hasShown = NO;
+    } @catch (NSException *e) {}
 }
 
 @end
 
-// Hook 触摸事件，增加多重判空防崩溃
+// ============================================================
+// Hook 触摸事件 - 只识别左下角
+// ============================================================
 %hook SpringBoard
+
+- (void)finishLaunchingWithOptions:(NSDictionary *)opts {
+    %orig;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        @try {
+            NSLog(@"[SplitScreen] Ready - LeftCorner only");
+        } @catch (NSException *e) {}
+    });
+}
 
 - (void)sendEvent:(UIEvent *)event {
     %orig;
 
     @autoreleasepool {
-        NSSet *touches = [event allTouches];
-        if (touches.count != 1) return;
+        @try {
+            NSSet *touches = [event allTouches];
+            if (touches.count != 1) return;
 
-        UITouch *touch = [touches anyObject];
-        if (touch.phase != UITouchPhaseBegan) return;
+            UITouch *touch = [touches anyObject];
+            if (touch.phase != UITouchPhaseBegan) return;
 
-        UIView *touchView = touch.view;
-        if (!touchView) return;
-        
-        UIWindow *window = touchView.window;
-        if (!window) return;
+            UIView *view = touch.view;
+            if (!view) return;
 
-        CGPoint point = [touch locationInView:window];
-        CGRect screenBounds = [UIScreen mainScreen].bounds;
-        CGFloat edgeSize = 60;
+            UIWindow *win = view.window;
+            if (!win) return;
 
-        SPSplitScreenManager *mgr = [SPSplitScreenManager sharedInstance];
-        [mgr loadPrefs];
+            CGPoint p = [touch locationInView:win];
+            CGRect sb = [UIScreen mainScreen].bounds;
+            CGFloat edge = 50;
 
-        BOOL leftBottom = CGRectContainsPoint(CGRectMake(0, screenBounds.size.height-edgeSize, edgeSize, edgeSize), point);
-        BOOL rightBottom = CGRectContainsPoint(CGRectMake(screenBounds.size.width-edgeSize, screenBounds.size.height-edgeSize, edgeSize, edgeSize), point);
+            // 只判断左下角热区
+            BOOL leftBottom = CGRectContainsPoint(
+                CGRectMake(0, sb.size.height - edge, edge, edge), p);
 
-        if ((mgr.triggerCorner == 0 && leftBottom) ||
-            (mgr.triggerCorner == 1 && rightBottom) ||
-            (mgr.triggerCorner == 2 && (leftBottom || rightBottom))) {
-            [mgr showSplitScreenAtPoint:point];
+            if (leftBottom) {
+                SPSplitScreenManager *mgr = [SPSplitScreenManager sharedInstance];
+                [mgr performSelectorOnMainThread:@selector(showSplitScreen)
+                                      withObject:nil waitUntilDone:NO];
+            }
+        } @catch (NSException *e) {
+            // 吞掉所有异常，绝不崩溃
         }
     }
 }
