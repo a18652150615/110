@@ -26,7 +26,8 @@ jobs:
 
       - name: 拉取 iOS SDK
         run: |
-          git clone https://github.com/theos/sdks.git ${{ github.workspace }}/theos/sdks
+          rm -rf ${{ github.workspace }}/theos/sdks
+          git clone --depth 1 https://github.com/theos/sdks.git ${{ github.workspace }}/theos/sdks
 
       - name: 编译 DEB 包
         run: |
