@@ -11,22 +11,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装系统依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            git build-essential fakeroot dpkg-dev \
-            libssl-dev libplist-dev libplist++-dev \
-            libpng-dev libxml2-dev python3
-
-      - name: 克隆 Theos
-        run: |
-          git clone --recursive https://github.com/theos/theos.git ${{ github.workspace }}/theos
-          echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
-
-      - name: 拉取 iOS SDK
-        run: |
-          git clone https://github.com/theos/sdks.git ${{ github.workspace }}/theos/sdks
+      - name: 配置 Theos 环境
+        uses: theosdev/theos-action@v1
+        with:
+          sdks: iphoneos16.0
 
       - name: 编译 DEB 包
         run: |
