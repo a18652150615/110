@@ -11,25 +11,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
+      - name: 安装系统依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y git build-essential libssl-dev libplist-dev libplist++-dev libpng16-dev
+          sudo apt-get install -y \
+            git build-essential fakeroot dpkg-dev \
+            libssl-dev libplist-dev libplist++-dev \
+            libpng-dev libxml2-dev python3
 
-      - name: Clone Theos
+      - name: 克隆 Theos
         run: |
           git clone --recursive https://github.com/theos/theos.git ${{ github.workspace }}/theos
           echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
 
-      - name: Pull iOS SDKs
+      - name: 拉取 iOS SDK
         run: |
           git clone https://github.com/theos/sdks.git ${{ github.workspace }}/theos/sdks
 
-      - name: Build DEB package
+      - name: 编译 DEB 包
         run: |
           make clean package THEOS_PACKAGE_SCHEME=rootless
 
-      - name: Upload artifact
+      - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: SplitScreenTweak-deb
