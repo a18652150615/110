@@ -1,66 +1,44 @@
-name: Build SplitScreenTweak DEB
+- name: 手动打 rootless deb
+  run: |
+    rm -rf pkg
+    mkdir -p pkg/DEBIAN
+    mkdir -p "pkg/var/jb/Library/MobileSubstrate/DynamicLibraries"
+    mkdir -p "pkg/var/jb/Library/PreferenceBundles/SPPrefs.bundle"
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+    DYLIB=$(find . -name "SplitScreenTweak.dylib" | head -1)
+    cp "$DYLIB" "pkg/var/jb/Library/MobileSubstrate/DynamicLibraries/SplitScreenTweak.dylib"
 
-jobs:
-  build:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
+    cat > "pkg/var/jb/Library/MobileSubstrate/DynamicLibraries/SplitScreenTweak.plist" << 'PLIST'
+    {
+        Filter = { Bundles = ( "com.apple.springboard" ); };
+    }
+    PLIST
 
-      - name: 安装依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git build-essential fakeroot dpkg-dev libssl-dev libplist-dev libpng-dev libxml2-dev python3 curl
+    # 复制设置 bundle
+    cp SPPrefs.bundle/Info.plist "pkg/var/jb/Library/PreferenceBundles/SPPrefs.bundle/Info.plist"
+    cp SPPrefs.bundle/Root.plist "pkg/var/jb/Library/PreferenceBundles/SPPrefs.bundle/Root.plist"
 
-      - name: 安装 Theos
-        run: |
-          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
-          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+    # 设置注册文件
+    mkdir -p "pkg/var/jb/Library/PreferenceBundles"
+    cat > "pkg/var/jb/Library/PreferenceBundles/SPPrefs.plist" << 'PLIST'
+    {
+        File = SPPrefs;
+        Label = "SplitScreen";
+    }
+    PLIST
 
-      - name: 编译
-        run: |
-          make clean THEOS_PACKAGE_SCHEME=rootless
-          make THEOS_PACKAGE_SCHEME=rootless
+    cat > pkg/DEBIAN/control << 'CTRL'
+    Package: com.yourname.splitscreentweak
+    Name: SplitScreenTweak
+    Version: 1.1.0
+    Architecture: iphoneos-arm64e
+    Description: Split screen with settings
+    Maintainer: Your Name
+    Author: Your Name
+    Section: Tweaks
+    Depends: mobilesubstrate, preferenceloader
+    CTRL
 
-      - name: 手动打 rootless deb
-        run: |
-          rm -rf pkg
-          mkdir -p pkg/DEBIAN
-          mkdir -p "pkg/var/jb/Library/MobileSubstrate/DynamicLibraries"
-          
-          DYLIB=$(find . -name "SplitScreenTweak.dylib" | head -1)
-          echo "dylib: $DYLIB"
-          cp "$DYLIB" "pkg/var/jb/Library/MobileSubstrate/DynamicLibraries/SplitScreenTweak.dylib"
-          
-          cat > "pkg/var/jb/Library/MobileSubstrate/DynamicLibraries/SplitScreenTweak.plist" << 'PLIST'
-          {
-              Filter = { Bundles = ( "com.apple.springboard" ); };
-          }
-          PLIST
-          
-          cat > pkg/DEBIAN/control << 'CTRL'
-          Package: com.yourname.splitscreentweak
-          Name: SplitScreenTweak
-          Version: 1.0.3
-          Architecture: iphoneos-arm64e
-          Description: Safe left corner split screen
-          Maintainer: Your Name
-          Author: Your Name
-          Section: Tweaks
-          Depends: mobilesubstrate
-          CTRL
-          
-          mkdir -p out
-          dpkg-deb -b pkg out/SplitScreenTweak.deb
-          echo "=== deb contents ==="
-          dpkg-deb -c out/SplitScreenTweak.deb
-
-      - name: 上传
-        uses: actions/upload-artifact@v4
-        with:
-          name: SplitScreenTweak-deb
-          path: out/*.deb
+    mkdir -p out
+    dpkg-deb -b pkg out/SplitScreenTweak.deb
+    dpkg-deb -c out/SplitScreenTweak.deb
