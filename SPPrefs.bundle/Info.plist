@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.yourname.SPPrefs</string>
+    <key>CFBundleExecutable</key>
+    <string></string>
+    <key>CFBundlePackageType</key>
+    <string>FMWK</string>
+    <key>CFBundleDisplayName</key>
+    <string>SplitScreen</string>
+    <key>PrincipalClass</key>
+    <string>PSListController</string>
+</dict>
+</plist>
