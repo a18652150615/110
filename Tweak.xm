@@ -2,11 +2,21 @@
 #import <Foundation/Foundation.h>
 #import <QuartzCore/QuartzCore.h>
 
-static CGFloat g_hotSize = 100;
 static BOOL g_crashed = NO;
 static UIWindow *g_mainWin = nil;
 static UIWindow *g_pinWin = nil;
 static UIWindow *g_debugWin = nil;
+
+static BOOL prefEnabled() {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:@"SP_Enabled"];
+}
+static CGFloat prefHotSize() {
+    CGFloat s = [[NSUserDefaults standardUserDefaults] floatForKey:@"SP_HotSize"];
+    return s > 20 ? s : 100;
+}
+static BOOL prefShowDebug() {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:@"SP_ShowDebug"];
+}
 
 @interface SP : NSObject
 + (UIWindowScene *)scene;
@@ -41,9 +51,11 @@ static UIWindow *g_debugWin = nil;
 
 + (void)showDebug {
     @try {
-        if (g_debugWin) return;
+        if (!prefShowDebug()) return;
+        if (g_debugWin) { g_debugWin.hidden = NO; return; }
         CGRect sb = [UIScreen mainScreen].bounds;
-        CGRect f = CGRectMake(0, sb.size.height - g_hotSize, g_hotSize, g_hotSize);
+        CGFloat hs = prefHotSize();
+        CGRect f = CGRectMake(0, sb.size.height - hs, hs, hs);
         UIWindow *dw = [self makeWindow:f level:3000];
         if (!dw) return;
         dw.backgroundColor = [UIColor colorWithRed:1.0 green:0 blue:0 alpha:0.4];
@@ -51,7 +63,7 @@ static UIWindow *g_debugWin = nil;
         dw.layer.borderWidth = 3;
         dw.userInteractionEnabled = NO;
 
-        UILabel *lb = [[UILabel alloc] initWithFrame:CGRectMake(0, g_hotSize/2-15, g_hotSize, 30)];
+        UILabel *lb = [[UILabel alloc] initWithFrame:CGRectMake(0, hs/2-15, hs, 30)];
         lb.text = @"点这";
         lb.textColor = [UIColor whiteColor];
         lb.font = [UIFont boldSystemFontOfSize:16];
@@ -66,6 +78,7 @@ static UIWindow *g_debugWin = nil;
 + (void)showSplit {
     @try {
         if (g_crashed) return;
+        if (!prefEnabled()) return;
         if (g_mainWin && !g_mainWin.hidden) return;
 
         CGRect sb = [UIScreen mainScreen].bounds;
@@ -132,6 +145,8 @@ static UIWindow *g_debugWin = nil;
 - (void)sendEvent:(UIEvent *)event {
     %orig;
     if (g_crashed) return;
+    if (!prefEnabled()) return;
+
     @autoreleasepool {
         @try {
             NSSet *ts = [event allTouches];
@@ -142,7 +157,8 @@ static UIWindow *g_debugWin = nil;
 
             CGPoint p = [t locationInView:t.view.window];
             CGRect sb = [UIScreen mainScreen].bounds;
-            if (p.x < g_hotSize && p.y > sb.size.height - g_hotSize) {
+            CGFloat hs = prefHotSize();
+            if (p.x < hs && p.y > sb.size.height - hs) {
                 dispatch_async(dispatch_get_main_queue(), ^{ [SP showSplit]; });
             }
         } @catch (NSException *e) {}
@@ -152,5 +168,13 @@ static UIWindow *g_debugWin = nil;
 %end
 
 %ctor {
-    @try { [SP showDebug]; } @catch (NSException *e) {}
+    @try {
+        // 默认启用
+        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+        if ([d objectForKey:@"SP_Enabled"] == nil) [d setBool:YES forKey:@"SP_Enabled"];
+        if ([d objectForKey:@"SP_HotSize"] == nil) [d setFloat:100 forKey:@"SP_HotSize"];
+        if ([d objectForKey:@"SP_ShowDebug"] == nil) [d setBool:YES forKey:@"SP_ShowDebug"];
+
+        [SP showDebug];
+    } @catch (NSException *e) {}
 }
